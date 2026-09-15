@@ -503,17 +503,20 @@
       a.textContent = '📞 ' + r.tel;
       row.append(a);
     }
-    booking.forEach((l) => row.append(extLink(l.url, 'btn' + (r.website ? '' : ' primary'), srcLabel(l.src) + 'で予約')));
+    // 同じ掲載元に2回載っている船宿（名寄せでまとめたもの）や Facebook が2つある船宿は、同じ名前のボタンが並ばないよう番号を付ける
+    const seen = new Map();
+    const label = (s) => { const n = (seen.get(s) || 0) + 1; seen.set(s, n); return n > 1 ? s + '（' + n + '）' : s; };
+    booking.forEach((l) => row.append(extLink(l.url, 'btn' + (r.website ? '' : ' primary'), label(srcLabel(l.src) + 'で予約'))));
     if (row.childNodes.length) actions.append(row);
     const others = links.filter((l) => srcKind(l.src) !== 'booking');
     const sns = r.sns || [];
     if (others.length || sns.length) {
       const row2 = el('div', 'row');
-      others.forEach((l) => row2.append(extLink(l.url, 'btn small', srcLabel(l.src) + 'の掲載ページ')));
+      others.forEach((l) => row2.append(extLink(l.url, 'btn small', label(srcLabel(l.src) + 'の掲載ページ'))));
       sns.forEach((u) => {
         const host = (u.match(/^https?:\/\/(?:www\.)?([^/]+)/) || [])[1] || '';
         const name = /instagram/.test(host) ? 'Instagram' : /facebook|fb\.com/.test(host) ? 'Facebook' : /twitter|x\.com/.test(host) ? 'X' : /(^|\.)line\.me$|^lin\.ee$/.test(host) ? 'LINE' : /threads\.net$/.test(host) ? 'Threads' : /youtu/.test(host) ? 'YouTube' : /tiktok/.test(host) ? 'TikTok' : host;
-        row2.append(extLink(u, 'btn small', name));
+        row2.append(extLink(u, 'btn small', label(name)));
       });
       actions.append(row2);
     }
