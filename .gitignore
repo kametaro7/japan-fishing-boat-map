@@ -1,0 +1,10 @@
+# 作業データ（掲載サイトのキャッシュ・取得した公式サイト本文・抽出バッチ・ログ）は公開しない
+work/
+__pycache__/
+*.pyc
+.DS_Store
+.claude/
+# build.py の差し替え用の一時ファイル
+data/detail.new/
+data/detail.old/
+data/*.tmp

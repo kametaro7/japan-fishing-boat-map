@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>全国釣り船マップ</title>
+<meta name="description" content="日本全国の釣り船・船宿・渡船を地図で探せるマップ。魚種・乗合/仕立・料金で絞り込み、プランの料金や出船時刻を確認して、公式サイトや予約ページへ移動できます。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%A3%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/5.24.0/maplibre-gl.css">
+<link rel="stylesheet" href="assets/style.css">
+<script>
+  // 初回描画前にテーマを決める（地図の見た目の選択を優先、無ければOS設定）
+  (function () {
+    var b = null;
+    try { b = localStorage.getItem('jfb.basemap'); } catch (e) {}
+    if (!b) b = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', b === 'dark' ? 'dark' : 'light');
+  })();
+</script>
+</head>
+<body>
+<div id="app">
+  <aside id="panel" class="panel half" aria-label="釣り船の検索と一覧">
+    <button id="sheetHandle" class="sheet-handle" type="button" aria-label="パネルの大きさを切り替え"><span></span></button>
+    <header class="panel-head">
+      <h1>全国釣り船マップ</h1>
+      <p class="sub" id="subtitle">釣り船・船宿・渡船</p>
+    </header>
+
+    <div class="search">
+      <input id="q" type="search" placeholder="船宿名・港・地名で検索" autocomplete="off" enterkeyhint="search" aria-label="船宿名・港・地名で検索">
+    </div>
+
+    <div class="toggles" role="group" aria-label="条件">
+      <button type="button" class="toggle" data-toggle="plans" aria-pressed="false"><span class="ico" aria-hidden="true">💴</span>料金・プランあり</button>
+      <button type="button" class="toggle" data-toggle="web" aria-pressed="false"><span class="ico" aria-hidden="true">🔗</span>公式サイトあり</button>
+    </div>
+
+    <div class="scroll" id="scroll">
+      <div id="browse">
+        <details class="filters" id="filters" open>
+          <summary><span>魚種・料金・地域で絞り込み</span><span class="fsum" id="filterSummary"></span></summary>
+          <div class="fgroup">
+            <div class="flabel" id="fishLabel">釣りたい魚</div>
+            <div class="chips" id="fishChips" role="group" aria-labelledby="fishLabel"></div>
+            <button type="button" class="linkbtn more-fish" id="moreFish" hidden>ほかの魚種も表示</button>
+          </div>
+          <div class="fgroup">
+            <div class="flabel" id="kindLabel">乗船スタイル</div>
+            <div class="chips" id="kindChips" role="group" aria-labelledby="kindLabel"></div>
+          </div>
+          <div class="fgroup">
+            <div class="flabel" id="capLabel">乗合プランの料金（1人・最安）</div>
+            <div class="chips" id="capChips" role="group" aria-labelledby="capLabel"></div>
+          </div>
+          <div class="fgroup">
+            <div class="flabel" id="regionLabel">地域</div>
+            <div class="chips" id="regionChips" role="group" aria-labelledby="regionLabel"></div>
+            <select id="pref" class="pref-select" aria-label="都道府県"></select>
+          </div>
+          <div class="fgroup options">
+            <label><input type="checkbox" id="optReg"> 登録簿だけに載っている船宿も表示</label>
+            <button type="button" id="reset" class="linkbtn">条件をリセット</button>
+          </div>
+        </details>
+
+        <section class="legend" aria-label="地図の印の凡例" id="legend"></section>
+
+        <div class="count" id="count" aria-live="polite"></div>
+        <div id="list" class="list"></div>
+      </div>
+
+      <div id="detail" class="detail" hidden></div>
+
+      <footer class="panel-foot">
+        <p>料金・出船時刻・プランは各掲載元（予約サイト・船宿紹介サイト）と公式サイトから 2026年9月に取得したもので、変わることがあります。乗船前に必ず船宿へ確認してください。</p>
+        <p id="sourcesNote"></p>
+        <p>地図: © <a href="https://openmaptiles.org/" target="_blank" rel="noopener noreferrer">OpenMapTiles</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors。住所の位置: 国土地理院 住所検索API。</p>
+      </footer>
+    </div>
+  </aside>
+
+  <main id="map" aria-label="釣り船の地図"></main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/5.24.0/maplibre-gl.js"></script>
+<script src="data/boats.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
