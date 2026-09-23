@@ -127,7 +127,53 @@ def port_key(s):
     return ''.join(chr(ord(c) - 0x60) if 'ァ' <= c <= 'ヶ' else c for c in s)
 
 
-def assign_port_coords(recs, report):
+def inland_km(lat, lon):
+    """その位置が海岸線からどれだけ内陸か(km)。位置の点検用のデータ（work/geo/japan.geojson）が無ければ 0。"""
+    try:
+        from coastline import coast_km
+    except Exception:
+        return 0.0
+    try:
+        return coast_km(lat, lon)
+    except SystemExit:
+        return 0.0
+
+
+def median_point(pts):
+    lats = sorted(p[0] for p in pts)
+    lons = sorted(p[1] for p in pts)
+    return (lats[len(lats) // 2], lons[len(lons) // 2])
+
+
+def osm_port_pick(cands, ref, limit, city=None, strict=True):
+    """同名の港の候補から1つ選ぶ。市区町村が分かればそれを優先し、なければ基準点にいちばん近いもの。
+
+    港の一覧は同名の港をすべて持っているわけではないので（「祖納港」は与那国島だけ、「田尻港」は南種子町だけ）、
+    市区町村が一致しないときは 30km より遠くへは動かさない（strict=False で解除。座標がまったく無いレコード用）。"""
+    if not cands:
+        return None
+    matched = False
+    if city:
+        c = nfkc(city)
+        same = [x for x in cands if x.get('city') and (nfkc(x['city']) in c or c in nfkc(x['city']))]
+        if same:
+            cands, matched = same, True
+            if len(same) == 1 and not ref:
+                return same[0]
+    if not matched and strict:
+        limit = min(limit, 30)
+    if not ref:
+        return cands[0] if (matched and len(cands) == 1) else None
+    ranked = sorted(cands, key=lambda c: dist_km(ref[0], ref[1], c['lat'], c['lon']))
+    d0 = dist_km(ref[0], ref[1], ranked[0]['lat'], ranked[0]['lon'])
+    if d0 > limit:
+        return None
+    if len(ranked) > 1 and dist_km(ref[0], ref[1], ranked[1]['lat'], ranked[1]['lon']) < d0 * 1.5 + 5:
+        return None
+    return ranked[0]
+
+
+def assign_port_coords(recs, tables, report):
     """座標も住所も無いが港名があるレコードに、同じ県・同じ港のほかの船宿の位置（中央値）を与える。"""
     site, town = defaultdict(list), defaultdict(list)
     for r in recs:
@@ -137,7 +183,15 @@ def assign_port_coords(recs, report):
             elif r['geo'] == 'town' and r['src'] != 'registry':
                 town[(r['pref'], r['pkey'])].append((r['lat'], r['lon']))
     lakes = load_json(os.path.join(WORK, 'geocode', 'lakes.json'), {}) or {}
-    n = nl = 0
+    center = defaultdict(list)   # 県ごとの代表点（同名の港が全国にあるときの選別に使う）
+    for r in recs:
+        if r['pref'] and r['lat'] is not None:
+            center[r['pref']].append((r['lat'], r['lon']))
+    for k, pts in list(center.items()):
+        lats = sorted(p[0] for p in pts)
+        lons = sorted(p[1] for p in pts)
+        center[k] = (lats[len(lats) // 2], lons[len(lons) // 2])
+    n = nl = no = 0
     for r in recs:
         if r['lat'] is None and r['pkey'] and r['pref']:
             pts = site.get((r['pref'], r['pkey'])) or town.get((r['pref'], r['pkey']))
@@ -157,7 +211,84 @@ def assign_port_coords(recs, report):
             if isinstance(g, dict):
                 r['lat'], r['lon'], r['geo'] = g['lat'], g['lon'], 'port'
                 nl += 1
-    report.append('coords from port gazetteer: %d, from lake/dam lookup: %d' % (n, nl))
+                continue
+            t, _, _ = port_point(tables, r['pref'], r['pkey'], center.get(r['pref']), limit=250, city=r.get('city'), strict=False)
+            if t:
+                r['lat'], r['lon'], r['geo'] = t[0], t[1], 'port'
+                no += 1
+    report.append('coords from port gazetteer: %d, from lake/dam lookup: %d, from port lists: %d' % (n, nl, no))
+
+
+# 湖・ダムの「港」は広すぎるので、港の位置への置き直しは行わない（湖岸のどこに係留しているかは分からない）
+LAKE_PORT = re.compile(r'湖|ダム|沼|貯水池')
+
+
+def port_tables(recs):
+    """港の位置の表を作る。掲載元の座標の中央値、港名から引いた座標（Nominatim）、OSM の港。"""
+    site = defaultdict(list)
+    for r in recs:
+        if r['pkey'] and r['pref'] and r['lat'] is not None and r['geo'] == 'site':
+            site[(r['pref'], r['pkey'])].append((r['lat'], r['lon'], id(r)))
+    return (site,
+            load_json(os.path.join(WORK, 'geocode', 'ports.json'), {}) or {},
+            load_json(os.path.join(WORK, 'geocode', 'ports_osm.json'), {}) or {},
+            load_json(os.path.join(WORK, 'geocode', 'ports_jp.json'), {}) or {})
+
+
+def port_point(tables, pref, pkey, ref, exclude_id=None, limit=150, city=None, strict=True):
+    """港の位置と、その根拠を返す。
+
+    同じ県・同じ港のほかの船宿の座標の中央値（実際の係留場所に近い）と、国土数値情報の漁港・港湾（公式の位置）を
+    突き合わせ、5km以上食い違うときは公式の位置を採る（中央値は住所から求めた内陸の点に引っ張られることがある）。
+    どちらも無ければ、港名から引いた座標（Nominatim）→ OSM の港の順。"""
+    site, ports, osm, jp = tables
+    pts = [(la, lo) for la, lo, i in site.get((pref, pkey), []) if i != exclude_id]
+    med = median_point(pts) if len(pts) >= 2 else None
+    cj = osm_port_pick(jp.get('%s|%s' % (pref, pkey)), ref or med, limit, city, strict)
+    if cj and not LAKE_PORT.search(nfkc(cj.get('name'))):
+        if med and dist_km(med[0], med[1], cj['lat'], cj['lon']) <= 5:
+            return med, 'median', len(pts)
+        return (cj['lat'], cj['lon']), 'jp', len(pts)
+    if med:
+        return med, 'median', len(pts)
+    g = ports.get('%s|%s' % (pref, pkey))
+    cg = osm_port_pick([g] if isinstance(g, dict) else None, ref or med, limit, city, True)
+    if cg and not LAKE_PORT.search(nfkc(cg.get('name'))):
+        return (cg['lat'], cg['lon']), 'name', 0
+    c = osm_port_pick(osm.get(pkey), ref or med, min(limit, 80), city, True)
+    if c and not LAKE_PORT.search(nfkc(c.get('name'))):
+        return (c['lat'], c['lon']), 'osm', 0
+    return None, None, 0
+
+
+def fix_address_coords(items, tables, report, label='records'):
+    """住所（事業者の自宅・事務所）から求めた位置が港から離れている船宿を、港の位置に置き直す。
+    掲載元が港ではなく事業者の住所を載せていることがある（熊本市の住所で三角東港の丸正丸、霧島市の住所で隼人港のまりえ丸）。
+    港の位置は、同じ県・同じ港のほかの船宿の座標の中央値か、港名から引いた座標（tools/geocode_ports.py）。"""
+    moved = []
+    for r in items:
+        pkey = r.get('pkey') or (port_key(r['port']) if r.get('port') else '')
+        if r['lat'] is None or not pkey or not r['pref'] or LAKE_PORT.search(nfkc(r.get('port'))):
+            continue
+        target, quality, n = port_point(tables, r['pref'], pkey, (r['lat'], r['lon']), exclude_id=id(r), city=r.get('city'))
+        if not target:
+            continue
+        d = dist_km(r['lat'], r['lon'], target[0], target[1])
+        # 住所から求めた位置（town/city）は、港から3km以上離れていたら港へ置き直す。
+        # 掲載元が地図で示している位置（site）と港の位置（port）は原則そのままにし、
+        # 海から3km以上内陸にあるもの（＝事業所や取り違え）だけ直す。同じ港の同名の港が県内に複数あるときに動かしすぎないため。
+        if r['geo'] in ('town', 'city'):
+            ok = d > 3
+        elif r['geo'] == 'site':
+            ok = d > 5 and inland_km(r['lat'], r['lon']) >= 3
+        else:
+            ok = quality in ('jp', 'median') and n >= 3 and d > 10 and inland_km(r['lat'], r['lon']) >= 3
+        if ok:
+            moved.append('%s(%s %s %s→%s %.0fkm)' % (r['name'], r['pref'], r['port'], r['geo'], quality, d))
+            r['lat'], r['lon'], r['geo'] = target[0], target[1], 'port'
+            if d > 15:
+                r['city'] = None  # 港と違う市区町村（事業者の住所）なので、一覧の地名には出さない。住所は詳細に残る
+    report.append('moved to the port position (%s): %d %s' % (label, len(moved), ', '.join(moved[:60])))
 
 
 def to_int(v):
@@ -800,13 +931,17 @@ def main():
     recs = [r for r in recs if '%s:%s' % (r['src'], r['src_id']) not in drop]
     report.append('records total %d' % len(recs))
     fix_misplaced_sites(recs, report)
-    assign_port_coords(recs, report)
+    tables = port_tables(recs)
+    assign_port_coords(recs, tables, report)
+    fix_address_coords(recs, tables, report, 'records')
     groups = cluster(recs, overrides, report)
     # 掲載終了（stale）のレコードは、ほかの掲載元と名寄せできたときだけ使う（単独では地図に出さない）
     n_groups = len(groups)
     groups = [g for g in groups if any(not recs[i]['stale'] for i in g)]
     report.append('stale-only clusters dropped: %d' % (n_groups - len(groups)))
     boats = [merge(recs, g) for g in groups]
+    # 港名を持つレコードと住所を持つレコードが別々のときは、統合で住所側の座標が採ばれることがある（熊本市の住所で三角東港の丸正丸）
+    fix_address_coords(boats, tables, report, 'boats')
     # 公式サイトのトップに廃業の告知がある船宿は地図に出さない。ただし予約サイトで受付中のものはリンクだけ外す
     kept, n_closed, n_closed_link = [], 0, 0
     for b in boats:

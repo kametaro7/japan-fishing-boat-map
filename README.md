@@ -2,8 +2,9 @@
 
 日本全国の釣り船・船宿・渡船（瀬渡し）・湖のガイド船を地図で探せる静的サイトです。
 
-**公開サイト: https://kametaro7.github.io/japan-fishing-boat-map/**
 魚種・乗船スタイル（乗合/仕立/渡船）・料金で絞り込み、各船宿のプラン（料金・出船/帰港時刻・対象魚）を確認して、公式サイトや予約ページへ移動できます。
+
+**公開サイト: https://kametaro7.github.io/japan-fishing-boat-map/**
 
 - 地図: MapLibre GL（cdnjs）＋ OpenFreeMap のベクタータイル
 - データ: `data/boats.js`（地図と一覧用の索引）と `data/detail/NN.json`（都道府県ごとの詳細。船宿を開いたときに読み込む）
@@ -24,6 +25,9 @@
 python3 tools/scrape_<掲載元>.py      # 掲載サイトごとのクローラ（work/cache にキャッシュ、work/sources/<掲載元>.json に出力）
 python3 tools/geocode.py             # 座標の無いレコードの住所 → 座標（国土地理院 住所検索API、work/geocode にキャッシュ）
 python3 tools/geocode_lakes.py       # 湖・ダムのガイド船の位置（OSM Nominatim、work/geocode/lakes.json）
+python3 tools/geocode_ports.py       # 港・乗り場の名前 → 座標（OSM Nominatim、work/geocode/ports.json）
+python3 tools/geocode_ports.py --verify  # 引いた港の座標の点検（県の中にあるか・海岸からの距離。外したものは ports_rejected.json）
+python3 tools/nlftp_ports.py         # 国土数値情報の漁港・港湾 → 港名と座標の辞書（work/geocode/ports_jp.json）
 python3 tools/build.py               # 名寄せ・統合 → data/boats.js, data/detail/*.json, work/build_report.txt
 python3 tools/fetch_official.py      # 料金の無い船宿の公式サイトから料金・プラン・出船ページを取得（失効・乗っ取り・廃業の告知も判定）
 python3 tools/validate_sites.py      # それ以外の公式サイトもトップページだけ取得して判定（--reassess で判定し直し）
@@ -34,12 +38,28 @@ python3 tools/verify_enrich.py       # 抽出した料金・時刻が原文に�
 #                                      （確認済みの値は work/enrich/_confirmed.json、--apply で残った値を消す）
 python3 tools/official_to_source.py  # 抽出結果 → work/sources/official.json
 python3 tools/build.py               # もう一度統合
+python3 tools/check_coords.py        # 位置の点検（海岸線から離れた場所にある船宿の一覧 → work/tmp/coord_check.json）
+```
+
+位置の点検（`tools/check_coords.py`・`tools/coastline.py`・`tools/geocode_ports.py --verify`）は都道府県界のポリゴンを使います。リポジトリには含めていないので、次で取得してください（出典: [dataofjapan/land](https://github.com/dataofjapan/land)、CC BY 4.0）。
+
+```
+mkdir -p work/geo && curl -sL -o work/geo/japan.geojson https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson
+```
+
+港の位置の辞書（`tools/nlftp_ports.py`）は国土数値情報の漁港・港湾データを使います（出典: 国土数値情報（漁港データ・港湾データ）国土交通省）。
+
+```
+cd work/geo
+curl -sA Mozilla/5.0 -o C09.zip https://nlftp.mlit.go.jp/ksj/gml/data/C09/C09-06/C09-06_GML.zip && unzip -oq C09.zip -d C09
+curl -sA Mozilla/5.0 -o C02.zip https://nlftp.mlit.go.jp/ksj/gml/data/C02/C02-14/C02-14_GML.zip && unzip -oq C02.zip -d C02
 ```
 
 - 各レコードの形式は `docs/SPEC.md`、掲載元の表示名と優先度は `work/sources/_labels.json`。
 - `work/`（掲載サイトのキャッシュ、取得した公式サイトの本文、抽出の途中結果、ログ）はリポジトリに含めていません。公開しているのはサイト本体（`index.html`・`assets/`・`data/`）と、データを作るスクリプト（`tools/`）です。
 - 名寄せは「電話＋名前」「電話」「公式サイトURL」「同じ県で同名かつ近い（または同じ市・同じ港）」の順。同名でも電話や公式サイトが食い違うものは別の船宿として扱います。
   電話が同じで名前が表記ゆれのもの（「永宝丸」と「知床遊漁船永宝丸」、「第十八八竜丸」と「第十八八龍丸」）や、同じ公式ページを載せているものは、同じ掲載元に2回載っていてもまとめます。県は掲載元の多数決で決めます（港の県を取り違えている掲載元があるため）。
+- 掲載元が港ではなく事業者の住所（自宅・事務所）を載せていることがあるので、港の位置（同じ県・同じ港のほかの船宿の座標の中央値、または港名から引いた座標）から3km以上離れた住所由来の位置は、港の位置に置き直します。港が分からない船宿は住所のままで、詳細に「地図の印: 住所（事業所）のおおよその位置」と出します。
 - 手修正は `data/overrides.json`（`drop`: 除外、`set`: 項目の上書き、`merge`: 名寄せの追加。理由は `_notes` に書く）。
 - 料金表を自由記述から拾う掲載元では、エサ・仕掛け・レンタル・仮眠・遠征の追加料金・子供料金などの金額が「プラン」に混ざるので、build.py が乗船料でないものを除く（予約サイトと原文照合済みの公式サイト抽出は対象外）。一覧の「○円〜」は乗合プランの最安値。
 - 公式サイトのトップに廃業の告知がある船宿は地図に出さない（予約サイトで受付中なら、公式サイトへのリンクだけ外す）。失効・乗っ取り（ギャンブル系スパム等）・名前解決できないサイトへのリンクも外す。
@@ -55,6 +75,7 @@ python3 tools/build.py               # もう一度統合
 
 予約・掲載サイト（釣割、キャスティング船釣り予約、つりー、THE BOAT、船釣り.jp、釣りビジョン、つり丸、遊漁船サーチ、釣具のポイント、グレナビ、釣り野郎、つりそく、RESERVER、遊漁船NAVI、釣具のイシグロ、日刊スポーツ、釣太郎 ほか）、各船宿の公式サイト、都道府県が公表している遊漁船業者の一覧（2026年9月時点でネット公表があったのは福井・大阪・京都・兵庫・岡山・高知・長崎）。
 クロールは robots.txt に従い、1サイトにつき直列・1秒前後の間隔で行いました。
+港の位置は、国土数値情報（漁港データ C09・港湾データ C02、国土交通省）と OpenStreetMap（OSM Nominatim・Overpass、© OpenStreetMap contributors、ODbL）、都道府県界のポリゴン（[dataofjapan/land](https://github.com/dataofjapan/land)、CC BY 4.0）を使っています。
 
 ## 注意
 
