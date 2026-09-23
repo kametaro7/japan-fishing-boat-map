@@ -9,6 +9,7 @@
 - 地図: MapLibre GL（cdnjs）＋ OpenFreeMap のベクタータイル
 - データ: `data/boats.js`（地図と一覧用の索引）と `data/detail/NN.json`（都道府県ごとの詳細。船宿を開いたときに読み込む）
 - ローカルで見るとき: `python3 -m http.server 8150` → http://localhost:8150/ （`file://` では詳細の読み込みができません）
+- 亀井商店合同会社のサイト内にも同じものを置いています: https://www.kameishouten.com/fishingmap/ （更新は `sh tools/publish_to_kameishouten.sh`）
 
 ## 地図の印
 
