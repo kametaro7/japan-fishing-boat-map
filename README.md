@@ -6,7 +6,7 @@
 
 **公開サイト: https://kametaro7.github.io/japan-fishing-boat-map/**
 
-- 地図: MapLibre GL（cdnjs）＋ OpenFreeMap のベクタータイル
+- 地図: MapLibre GL 6（jsDelivr の ES モジュール版）＋ OpenFreeMap のベクタータイル
 - データ: `data/boats.js`（地図と一覧用の索引）と `data/detail/NN.json`（都道府県ごとの詳細。船宿を開いたときに読み込む）
 - ローカルで見るとき: `python3 -m http.server 8150` → http://localhost:8150/ （`file://` では詳細の読み込みができません）
 
