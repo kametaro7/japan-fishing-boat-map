@@ -495,8 +495,11 @@
     if (pills.childNodes.length) body.append(pills);
 
     const actions = el('div', 'actions');
-    if (r.website) actions.append(extLink(r.website, 'btn primary', '公式サイト'));
+    const catchLink = r.catch || {};
+    if (r.website) actions.append(extLink(r.website, 'btn primary', catchLink.self ? '公式サイト（釣果ブログ）' : '公式サイト'));
     const row = el('div', 'row');
+    // 公式サイトから見つけた釣果のページ（tools/find_catch_links.py）
+    if (catchLink.url) row.append(extLink(catchLink.url, 'btn', catchLink.label || '釣果'));
     if (r.tel) {
       const a = el('a', 'btn');
       a.href = 'tel:' + r.tel.replace(/[^\d]/g, '');
@@ -512,7 +515,8 @@
     const sns = r.sns || [];
     if (others.length || sns.length) {
       const row2 = el('div', 'row');
-      others.forEach((l) => row2.append(extLink(l.url, 'btn small', label(srcLabel(l.src) + 'の掲載ページ'))));
+      // 釣りビジョンの掲載ページは釣果の一覧（/choka/）なので、そう書く
+      others.forEach((l) => row2.append(extLink(l.url, 'btn small', label(srcLabel(l.src) + (/\/choka\//.test(l.url) ? 'の釣果' : 'の掲載ページ')))));
       sns.forEach((u) => {
         const host = (u.match(/^https?:\/\/(?:www\.)?([^/]+)/) || [])[1] || '';
         const name = /instagram/.test(host) ? 'Instagram' : /facebook|fb\.com/.test(host) ? 'Facebook' : /twitter|x\.com/.test(host) ? 'X' : /(^|\.)line\.me$|^lin\.ee$/.test(host) ? 'LINE' : /threads\.net$/.test(host) ? 'Threads' : /youtu/.test(host) ? 'YouTube' : /tiktok/.test(host) ? 'TikTok' : host;

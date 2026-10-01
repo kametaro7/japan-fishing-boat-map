@@ -509,6 +509,9 @@ def prep(r):
     o['tel'] = norm_tel(r.get('tel'))
     o['tel_disp'] = tel_display(r.get('tel'))
     web = clean_url(r.get('website'))
+    m = web and re.match(r'https?://(?:profile\.ameba\.jp/ameba|(?:www\.)?ameba\.jp/profile/general)/([\w-]+)', web)
+    if m:
+        web = 'https://ameblo.jp/%s/' % m.group(1)  # Ameba のプロフィールではなくブログを公式サイトにする
     sns = [clean_url(u) for u in (r.get('sns') or []) if clean_url(u)]
     if web and url_key(web) in BAD_SITES:
         web = None  # 失効・乗っ取り・無関係と判定された公式サイト（tools/fetch_official.py）
@@ -859,6 +862,42 @@ def merge(recs, idxs):
     return b
 
 
+# 公式サイトから見つけた釣果のページ（tools/find_catch_links.py → work/official/catch.json）のボタン名
+CATCH_SNS = (('instagram', 'Instagram'), ('facebook', 'Facebook'), ('fb.com', 'Facebook'), ('twitter', 'X'), ('x.com', 'X'),
+             ('youtube', 'YouTube'), ('youtu.be', 'YouTube'), ('tiktok', 'TikTok'), ('threads', 'Threads'), ('line.me', 'LINE'), ('lin.ee', 'LINE'))
+CATCH_SITE_NAMES = {'fishing-v.jp': '釣りビジョン', 'funaduri.jp': '船釣り.jp', 'theboat.jp': 'THE BOAT', 'tsurimaru.jp': 'つり丸',
+                    'anglers.jp': 'アングラーズ', 'chowari.jp': '釣割', 'tsuree.jp': 'つりー', 'point-i.jp': '釣具のポイント',
+                    'tsurisoku.com': 'つりそく'}
+
+
+def catch_link(rec, links, sns=()):
+    """釣果ページの {url, label}。公式サイト自体が釣果のブログなら {self: True}。"""
+    if not rec:
+        return None
+    if rec.get('state') == 'self':
+        return {'self': True} if (rec.get('evidence') or 0) >= 3 else None
+    if rec.get('state') != 'ok' or not rec.get('url'):
+        return None
+    url, kind, how, text = rec['url'], rec.get('kind'), rec.get('how'), rec.get('text') or ''
+    if any(clean_url(l.get('url')) == clean_url(url) for l in links) or any(clean_url(u) == clean_url(url) for u in sns):
+        return None  # 掲載元・SNS のボタンと同じページ
+    host = re.sub(r'^www\.', '', (re.match(r'https?://([^/:]+)', url) or [None, ''])[1].lower())
+    link_hosts = {re.sub(r'^www\.', '', (re.match(r'https?://([^/:]+)', l.get('url') or '') or [None, ''])[1].lower()) for l in links}
+    if kind == 'catchsite' and host in link_hosts:
+        return None  # 同じ釣果サイトの店のページがすでに掲載元のボタンにある（釣りビジョンなど）
+    if kind == 'sns':
+        label = '釣果（%s）' % next((n for k, n in CATCH_SNS if k in host), 'SNS')
+    elif kind == 'catchsite':
+        label = '釣果（%s）' % next((n for d, n in CATCH_SITE_NAMES.items() if host == d or host.endswith('.' + d)), host)
+    elif kind == 'blog' and how == 'blog_link':
+        label = '公式ブログ'  # 公式サイトが「ブログ」「船長日誌」と案内している外部ブログ（中身の釣果は確かめていない）
+    elif kind == 'blog':
+        label = '釣果（公式ブログ）'
+    else:
+        label = '公式サイトの釣果'
+    return {'url': url, 'label': label}
+
+
 F_PLANS, F_WEB, F_BOOK, F_NORIAI, F_SHITATE, F_TOSEN, F_REG, F_APPROX, F_LISTED = 1, 2, 4, 8, 16, 32, 64, 128, 256
 
 
@@ -960,6 +999,18 @@ def main():
         for b in boats:
             if b['id'] == bid:
                 b.update(fields)
+    catch = load_json(os.path.join(WORK, 'official', 'catch.json'), {}) or {}
+    n_catch = Counter()
+    for b in boats:
+        if 'catch' in b:  # data/overrides.json の set で手で決めたもの（null ならボタンを出さない）
+            if b['catch']:
+                n_catch['manual'] += 1
+            continue
+        c = catch_link(catch.get(url_key(b['website'])), b['links'], b.get('sns') or ()) if b['website'] else None
+        if c:
+            b['catch'] = c
+            n_catch['self' if c.get('self') else c['label']] += 1
+    report.append('catch pages from official sites: %d %s' % (sum(n_catch.values()), dict(n_catch)))
     placed = [b for b in boats if b['lat'] is not None and b['pref']]
     unplaced = [b for b in boats if not (b['lat'] is not None and b['pref'])]
     jitter(placed)

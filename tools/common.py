@@ -79,7 +79,8 @@ def tel_display(s):
 # 掲載サイトなど「船宿の公式サイトではない」ホスト
 NOT_OFFICIAL_HOSTS = ('chowari.jp', 'tsuree.jp', 'theboat.jp', 'castingnet.jp', 'funaduri.jp', 'fishing-v.jp',
                       'kanpari.jp', 'google.com', 'google.co.jp', 'goo.gl', 'maps.app.goo.gl', 'yahoo.co.jp',
-                      'asoview.com', 'jalan.net', 'rakuten.co.jp', 'airtrip.jp', 'veltra.com', 'tabelog.com')
+                      'asoview.com', 'jalan.net', 'rakuten.co.jp', 'airtrip.jp', 'veltra.com', 'tabelog.com',
+                      'fishing-station.jp', 'tsurimaru.jp', 'yugyosen.com', 'yugyosen-navi.com', 'point-i.jp', 'gurenavi.jp')
 SNS_HOSTS = ('facebook.com', 'fb.com', 'instagram.com', 'twitter.com', 'x.com', 'line.me', 'lin.ee',
              'youtube.com', 'youtu.be', 'tiktok.com', 'threads.net')
 # 1つのホストに多数の利用者がいるサービス（パスやサブドメインまで見ないと同一視できない）
